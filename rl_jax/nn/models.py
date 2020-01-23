@@ -1,26 +1,30 @@
+import functools
 from typing import Callable, Sequence
 
 import jax
+from ..typing import (JaxModule, JaxTensor, 
+                      ForwardFn, Parameter, PartialJaxModule)
 
 
-class Sequential(list):
-
-    def __init__(self, key, *layers):
-        layer_keys = jax.random.split(key, num=len(layers))
-        self.layers = layers
-        for k, l in zip(layer_keys, self.layers):
-            l.init(k)
+def _sequential_forward(parameters: Sequence[Parameter], 
+                        x: JaxTensor,
+                        forward_fns: ForwardFn) -> JaxTensor:
     
-    @property
-    def parameters(self):
-        return [l.parameters for l in self.layers]
+    for p, f in zip(parameters, forward_fns):
+        x = f(p, x)
     
-    @parameters.setter
-    def parameters(self, val):
-        for l, p in zip(self.layers, val):
-            l.parameters = p
+    return x
 
-    def __call__(self, params: Sequence[dict], x):
-        for l, p in zip(self.layers, params):
-            x = l(p, x)
-        return x
+
+def sequential(key, *layers: Sequence[PartialJaxModule]) -> JaxModule:
+    # Randomly initialize layers
+    layer_keys = jax.random.split(key, num=len(layers))
+    layers = [l(k) for l, k in zip(layers, layer_keys)]
+
+    parameters = [l.parameters for l in layers]
+    forward_fns = [l.forward_fn for l in layers]
+    model_forward_fn = functools.partial(_sequential_forward, 
+                                         forward_fns=forward_fns)
+   
+    return JaxModule(parameters=parameters, 
+                     forward_fn=model_forward_fn)
