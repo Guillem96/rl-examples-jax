@@ -38,5 +38,5 @@ def sequential(key, *layers: Sequence[PartialJaxModule]) -> JaxModel:
     model_forward_fn = functools.partial(_sequential_forward, 
                                          forward_fns=forward_fns)
    
-    return JaxModule(parameters=parameters, 
-                     forward_fn=model_forward_fn)
+    return JaxModel(parameters=parameters, 
+                    forward_fn=model_forward_fn)
