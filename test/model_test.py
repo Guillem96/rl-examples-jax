@@ -73,4 +73,4 @@ for i in range(100):
   # Check if the model outputs a value close to one
 key, subkey = jax.random.split(key)
 x = jax.random.normal(subkey, shape=(128,))
-print(model.forward_fn(model.parameters, x))
+print(model(x))
