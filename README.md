@@ -29,6 +29,8 @@ x_input = jax.random.uniform(subkey, shape=(32,))
 prediction = model(x_input)
 ```
 
+To learn more about the API refer to this [example](test/train_mnist.py) where we describe how to train a multi class classification model.
+
 ## References
 
 - [JAX](http://github.com/google/jax) - Composable Transformations of Python+NumPy programs 2018

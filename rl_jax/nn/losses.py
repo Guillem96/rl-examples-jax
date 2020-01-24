@@ -11,16 +11,15 @@ _CriterionOut = Union[JaxTensor, float]
 def bce(y_true: JaxTensor, 
         y_pred: JaxTensor, 
         reduction: str = None) -> _CriterionOut:
+    epsilon = 1e-6
     y_pred = y_pred.reshape(-1)
-    y_pred = np.clip(y_pred, 1e-6, 1 - 1e-6)
+    y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
 
     y_true = y_true.astype('float32')
 
-    # loss = y_true * np.log(y_pred + 1e-6)
-    # loss += (1 - y_true) * np.log(1 - y_pred + 1e-6)
-    # loss = -loss
-
-    pt = np.where(y_true == 1, y_pred + 1e-6, 1 - y_pred + 1e-6)
+    pt = np.where(y_true == 1, 
+                  y_pred + epsilon, 
+                  1 - y_pred + epsilon)
     loss = -np.log(pt)
     
     if reduction is None or reduction == 'none':
@@ -28,7 +27,6 @@ def bce(y_true: JaxTensor,
     elif reduction == 'sum':
         return np.sum(loss)
     elif reduction == 'mean':
-        # sum_over_batch = np.sum(loss, axis=-1)
         return np.mean(loss)
     else:
         raise ValueError('Unexpected reduction type')

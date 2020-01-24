@@ -12,12 +12,11 @@ class JaxModel(JaxModule):
                  x: JaxTensor, 
                  training: bool = True,
                  vectorize: bool = False):
-        # Use this function during inference
-        fn = functools.partial(self.forward_fn, training=training)
 
+        fn = functools.partial(self.forward_fn, training=training)
         if vectorize:
-          fn = jax.vmap(fn, in_axes=(None, 0))
-        
+            fn = jax.vmap(fn, in_axes=(None, 0))
+
         return fn(self.parameters, x)
     
     def update(self, parameters: Sequence[Parameter]):
@@ -36,7 +35,9 @@ def _sequential_forward(parameters: Sequence[Parameter],
     return x
 
 
-def sequential(key, *layers: Sequence[PartialJaxModule]) -> JaxModel:
+def sequential(key: JaxTensor, 
+               *layers: Sequence[PartialJaxModule]) -> JaxModel:
+    
     # Randomly initialize layers
     layer_keys = jax.random.split(key, num=len(layers))
     layers = [l(k) for l, k in zip(layers, layer_keys)]

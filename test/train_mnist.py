@@ -9,21 +9,20 @@ from sklearn.datasets import fetch_openml
 import rl_jax.nn as nn
 from rl_jax.typing import JaxTensor
 
-EPOCHS = 5
+EPOCHS = 8
 BATCH_SIZE = 32
 STEPS_PER_EPOCH = 256
 
 
-def accuracy(model, x, y):
-    y_pred = model(x, vectorize=True, training=False)
+def accuracy(y_true: JaxTensor, y_pred: JaxTensor):
     y_pred = np.argmax(y_pred, axis=1)
-    y_true = np.argmax(y, axis=1)
+    y_true = np.argmax(y_true, axis=1)
 
-    n_instances = y.shape[0]
+    n_instances = y_true.shape[0]
     true_instances = np.sum(y_pred == y_true)
 
     return true_instances / n_instances
-
+    
 
 def train_test_split(key: JaxTensor,
                      x: JaxTensor, y: JaxTensor):
@@ -47,57 +46,75 @@ def main():
     key = jax.random.PRNGKey(0)
 
     print('Downloading data...')
+    # Download MNIST data using scikit-learn fetch openml
     X, y = fetch_openml('mnist_784', version=1, return_X_y=True)
     
+    # Convert data to numeric types
     X = X.astype('float32')
     y = y.astype('float32')
 
+    # Train test split
     print('Generating train test splits...')
     x_train, x_test, y_train, y_test = train_test_split(key, X, y)
 
-    print(y_train)
+    # As we are dealing with a multi class classification problem
+    # we have to one hot encode the labels
     y_train = nn.utils.one_hot(y_train, n_classes=10)
     y_test = nn.utils.one_hot(y_test, n_classes=10)
 
-    # mean = np.mean(x_train, axis=0)
-    # std = np.std(x_train, axis=0)
-    # x_train = (x_train - mean) / std
-    # x_test = (x_test - mean) / std
-
-    # Define the model
+    # Define a sequential model
+    # The model receives two kind of parameters
+    #    - A random jax key to initialize the layers weights
+    #    - A set of JaxPartialModules, JaxPartialModule is a partially
+    #      evaluated function that when is called with a random key as
+    #      a parameter, it returns a fully functional JaxModule
     model = nn.sequential(
         key,
         partial(nn.linear,
                 in_features=28 * 28, 
                 out_features=512, 
                 activation=jax.nn.sigmoid),
-        # partial(nn.dropout, prob=.5),
         partial(nn.linear,
                 in_features=512, 
                 out_features=256, 
                 activation=jax.nn.relu),
-        # partial(nn.dropout, prob=.5),
         partial(nn.linear,
                 in_features=256, 
                 out_features=128, 
                 activation=jax.nn.relu),
+        partial(nn.dropout, prob=.3),
         partial(nn.linear,
                 in_features=128, 
                 out_features=10, 
                 activation=jax.nn.softmax),
     )
+
+    # The model is a JaxModel
+    # JaxModel has two attributes
+    #    - forward_fn: A function is a differentiable function 
+    #      defining how a set of parameters should
+    #      operated in order to compute a tensor. For example, 
+    #      the forward function of an `nn.linear` is 
+    #      `lambda params, x: np.dot(params['W'], x) + params['bias']` 
+    #    - parameters: A group of parameters or weights
     
+    # Create a CriterionFunction, in this case we use a cross entropy
+    # loss with a mean reduction over the batch
     criterion = partial(nn.ce, reduction='mean')
 
+    # Define the backward step of model to compute the derivatives of the
+    # error wtr of the model.parameters
     backward_fn = nn.backward(model, criterion)
     backward_fn = jax.jit(backward_fn)
 
+    # Create an optimizer to update the model parameters
     optimizer = nn.optim.simple_optimizer(learning_rate=1e-3)
     optimizer = jax.jit(optimizer)
 
     for epoch in range(EPOCHS):
         print(f'Epoch [{epoch}]')
         for step in range(STEPS_PER_EPOCH):
+            # Sample a batch
             key, subkey = jax.random.split(key)
             batch_idx = jax.random.randint(subkey, 
                                            shape=(BATCH_SIZE,),
@@ -105,17 +122,26 @@ def main():
             x_batch = x_train[batch_idx]
             y_batch = y_train[batch_idx]
 
+            # Compute the loss and the gradients
             loss, gradients = backward_fn(model.parameters, x_batch, y_batch)
+            # Apply gradients to reduce the loss
             new_parameters = optimizer(model.parameters, gradients)
+            
+            # JaxModels are immutable, so when updating the model with
+            # new parameters, we are creating a new instance of a JaxModel
+            # with the new parameters
             model = model.update(new_parameters)
 
             if step % 20 == 0:
                 print(f'Epoch [{epoch}] loss: {loss:.4f}')
 
     print('Evaluating...')
-
-    train_acc = accuracy(model, x_train, y_train)
-    test_acc = accuracy(model, x_test, y_test)
+    
+    y_pred = model(x_train, vectorize=True, training=False)
+    train_acc = accuracy(y_train, y_pred)
+    
+    y_pred = model(x_test, vectorize=True, training=False)
+    test_acc = accuracy(y_test, y_pred)
 
     print(f'Train Accuracy: {train_acc:.3f}')
     print(f'Test Accuracy: {test_acc:.3f}')
