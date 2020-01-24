@@ -15,8 +15,8 @@ Parameter = Dict[str, JaxTensor]
 
 # Type signature for performing forward step with a set of
 # parameters
-# forward:: Parameter -> JaxTensor -> JaxTensor 
-ForwardFn = Callable[[Parameter, JaxTensor], JaxTensor]
+# forward:: Parameter -> JaxTensor -> bool -> JaxTensor 
+ForwardFn = Callable[[Parameter, JaxTensor, bool], JaxTensor]
 
 # Type signarure for function in charge of performing the backward
 # step (compute partial derivatives of the loss wtr the model parameters)
@@ -39,10 +39,6 @@ ActivationFn = Callable[[JaxTensor], JaxTensor]
 class JaxModule(NamedTuple):
     forward_fn: ForwardFn
     parameters: Union[Parameter, Sequence[Parameter]]
-
-    def update(self, parameters: Union[Parameter, Sequence[Parameter]]):
-        return JaxModule(forward_fn=self.forward_fn, 
-                         parameters=parameters)
 
 # JaxModule not initialized, to initialize a jax module you have to
 # provide it a random key

@@ -8,22 +8,30 @@ from ..typing import (JaxModule, JaxTensor,
 
 class JaxModel(JaxModule):
     
-    def __call__(self, x: JaxTensor, vectorize: bool = False):
+    def __call__(self, 
+                 x: JaxTensor, 
+                 training: bool = True,
+                 vectorize: bool = False):
         # Use this function during inference
+        fn = functools.partial(self.forward_fn, training=training)
+
         if vectorize:
-          fn = jax.vmap(self.forward_fn)
-        else:
-          fn = self.forward_fn
+          fn = jax.vmap(fn, in_axes=(None, 0))
         
         return fn(self.parameters, x)
-      
+    
+    def update(self, parameters: Sequence[Parameter]):
+        return JaxModel(forward_fn=self.forward_fn, 
+                        parameters=parameters)
+
 
 def _sequential_forward(parameters: Sequence[Parameter], 
                         x: JaxTensor,
-                        forward_fns: ForwardFn) -> JaxTensor:
+                        training: bool = True,
+                        forward_fns: ForwardFn = None) -> JaxTensor:
     
     for p, f in zip(parameters, forward_fns):
-        x = f(p, x)
+        x = f(p, x, training=training)
     
     return x
 

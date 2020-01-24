@@ -1,5 +1,5 @@
-from .layers import linear
+from .layers import linear, dropout
 from .models import sequential
-from .losses import bce
+from .losses import bce, ce
 from .utils import backward
 from . import optim

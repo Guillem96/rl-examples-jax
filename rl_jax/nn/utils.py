@@ -1,6 +1,7 @@
 
 import jax
-from ..typing import BackwardFn, Criterion, JaxModule, Parameter
+import jax.numpy as np
+from ..typing import BackwardFn, Criterion, JaxModule, JaxTensor, Parameter
 
 
 def backward(model: JaxModule, 
@@ -18,3 +19,8 @@ def backward(model: JaxModule,
     # Differentiate the forward and loss function
     # Reverse gradients :)
     return jax.value_and_grad(forward_n_loss)
+
+
+def one_hot(x: JaxTensor, n_classes: int) -> JaxTensor:
+    classes = np.arange(n_classes)
+    return np.array(x[:, None] == classes).astype(x.dtype)

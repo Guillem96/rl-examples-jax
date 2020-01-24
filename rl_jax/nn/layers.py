@@ -2,6 +2,8 @@ import functools
 
 import jax
 import jax.numpy as np
+import numpy as onp
+
 
 from ..typing import (ActivationFn, JaxTensor, 
                       JaxModule, Parameter)
@@ -9,13 +11,14 @@ from ..typing import (ActivationFn, JaxTensor,
 
 def _linear_forward(params: Parameter, 
                     x: JaxTensor,
-                    activation: ActivationFn) -> JaxTensor:
+                    training: bool = True,
+                    activation: ActivationFn = lambda x: x) -> JaxTensor:
     W = params['W']
     b = params['bias']
 
     out = np.dot(W, x)
-    if b is not None:
-        out = out + b
+    # if b is not None:
+    out = out + b
     
     return activation(out)
 
@@ -57,5 +60,23 @@ def linear(key: JaxTensor,
                                 activation=activation)
 
     return JaxModule(parameters=params, 
-                    forward_fn=forward_fn)
+                     forward_fn=forward_fn)
   
+
+def _forward_dropout(params: Parameter,
+                     x: JaxTensor, 
+                     training: bool = True,
+                     prob: float = .5) -> JaxTensor:
+    if not training:
+        return x
+
+    drop_mask = onp.random.choice([0, 1], 
+                                  p=[prob, 1 - prob],
+                                  size=x.shape)
+    return np.multiply(drop_mask, x)
+
+
+def dropout(key: JaxTensor, prob: float = .5):
+    return JaxModule(parameters={}, 
+                     forward_fn=functools.partial(_forward_dropout, 
+                                                  prob=prob))
