@@ -4,7 +4,7 @@ import jax
 import jax.numpy as np
 
 from ..typing import (ActivationFn, JaxTensor, 
-                      JaxModule, Parameter, PartialJaxModule)
+                      JaxModule, Parameter)
 
 
 def _linear_forward(params: Parameter, 
@@ -20,24 +20,42 @@ def _linear_forward(params: Parameter,
     return activation(out)
 
 
-def linear(in_features: int,
+def linear(key: JaxTensor,
+           in_features: int,
            out_features: int, 
            activation: ActivationFn = lambda x: x,
-           bias: bool = True) -> PartialJaxModule:
+           bias: bool = True) -> JaxModule:
+    """
+    Creates a JaxModule corsponding to a linear layer
     
-    def init(key):
-        W_key, b_key = jax.random.split(key)
+    Parameters
+    ----------
+    key: JaxTensor
+        Jax random key to randomly initialize the layer weights
+    in_features: int
+        Input feature size
+    out_features: int
+        Number of features after the linear transformation
+    activation: ActivationFn, default a lniear activation (lambda x: x)
+        Activation to apply after the linear transformation. e.g `jax.nn.relu`, `jax.nn.sigmoid`...
+    bias: bool, default True
+        Whether or not the linear layer has to add bias
     
-        x_init = jax.nn.initializers.xavier_uniform() 
-        norm_init = jax.nn.initializers.normal()
+    Returns
+    -------
+    JaxModule
+    """
+    W_key, b_key = jax.random.split(key)
 
-        W = x_init(W_key, shape=(out_features, in_features))
-        b = None if not bias else norm_init(b_key, shape=())
-        params = dict(W=W, bias=b)
-        forward_fn = functools.partial(_linear_forward, 
-                                    activation=activation)
+    x_init = jax.nn.initializers.xavier_uniform() 
+    norm_init = jax.nn.initializers.normal()
 
-        return JaxModule(parameters=params, 
-                        forward_fn=forward_fn)
+    W = x_init(W_key, shape=(out_features, in_features))
+    b = None if not bias else norm_init(b_key, shape=())
+    params = dict(W=W, bias=b)
+    forward_fn = functools.partial(_linear_forward, 
+                                activation=activation)
 
-    return init
+    return JaxModule(parameters=params, 
+                    forward_fn=forward_fn)
+  
