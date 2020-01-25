@@ -1,4 +1,4 @@
-# Cartpole with JAX
+# CartPole with JAX
 
 Welcome back guys, it's been a long since last blog post. I come with new interests and a lot of new knowledge to share with you. 
 In this post, I am going to explain to you my brand new toy: **JAX** [1].
@@ -65,13 +65,15 @@ The goal of the agent is to maximize the future reward.
 
 In this section, we are going to describe Deep Q-Learning with few sentences. To better understand the proposed solution you should refer to [2].
 
-The main idea behind Q-Learning is that if we have a function $ Q*(\phi, a) $ that can tell us the expected utility given a state $ \phi $ and an action $ a $ we will be able to extract an optimal policy $ \pi $  that maximizes the utility or return over a sequence of states.
+The main idea behind Q-Learning is that if we have a function $ Q^*(\phi, a) $ that can tell us the expected utility given a state $ \phi $ and an action $ a $ we will be able to extract an optimal policy $ \pi $  that maximizes the utility or return over a sequence of states.
 
 ## Implementation
 
 I hope you are ready for a JAX implementation 😎.
 
 ```python
+import random
+from typing import *
 from functools import partial
 
 import gym # RL environments
@@ -79,6 +81,7 @@ import jax # Autograd package
 import jax.numpy as np # GPU NumPy :)
 
 import rl_jax.nn as nn # Custom package
+from rl_jax.typing import *
 ```
 
 To make life easier, I developed a high-level API to prototype NN architectures. The API is thought to be simple and intuitive, but it requires a mid-level understanding of higher-order functions.
@@ -104,8 +107,6 @@ Talking about code, we are going to need to classes, one to represent the*transi
 
 ```python
 from collections import deque # Cyclic list with max capacity
-from typing import Union, NamedTuple
-from rl_jax.typing import JaxTensor
 
 class Transition(NamedTuple):
     state: JaxTensor
@@ -162,6 +163,7 @@ A part from the model we have to define the loss function with respect of the mo
 parameters, so later we can differentiate it and compute the gradients.
 
 ```python
+# Mean squared error
 mse = lambda y1, y2: (y1 - y2) ** 2
 
 @jax.grad # Differentiate the loss
@@ -178,6 +180,141 @@ backward_fn = jax.jit(compute_loss)
 optimizer = nn.optim.simple_optimizer(learning_rate=1e-3)
 optimizer = jax.jit(optimizer) # Compile
 ```
+
+### Take the action
+
+Our agent has to choose an action every timestep. To do so we use an $ \epsilon $-greedy
+strategy. It means that every timestep we flip a biased coin to return true with an 
+$ \epsilon $ probability and in this case we should take a random action, otherwise,
+we use our value function estimator to pick the action that maximizes the value.
+
+```python
+def take_action(key, state):
+    key, sk = jax.random.split(key)
+    if jax.random.uniform(sk, shape=(1,)) < EPSILON:
+        # Remember that we have only 2 actions (left, right)
+        action = jax.random.randint(sk, shape=(1,), minval=0, maxval=2)
+    else:
+        # When invoking __call__ method of JaxModule the parameters are implicitly
+        # passed as argument of the forward function of the model (refer to custom nn module implementation)
+        # Compute state QValues
+        q_values = dqn(state, training=False)
+        # Pick the action that maximizes the value
+        action = np.argmax(q_values)
+    
+    return int(action)
+```
+
+### Training step
+
+The basic idea behind many RL algorithms is to estimate the action-value 
+function by using th Bellman Equation as an iterative update [2]. 
+$ Q_{i+1}(\phi, a) = r + \gamma max_{a\textprime} Q_i(\phi\textprime, a\textprime) $.
+In real-world examples, this is impractical due to large state spaces and time complexity. 
+For this reason we use a function estimator $ Q^*(\phi, a) \approx Q(\phi, a, \theta) $,
+where $ \theta $ are the Neural network weights.
+
+Therefore, in the following training step, we will be modifying $ \theta $ until
+convergence.
+
+```python
+BATCH_SIZE = 32
+GAMMA = .99
+EPSILON = .3
+
+def train():
+    if len(memory) < BATCH_SIZE:
+        return dqn # No train because we do not have enough experiences
+    # Experience replay
+    transitions = memory.sample(BATCH_SIZE)
+        
+    # Convert transition into tensors
+
+    transitions = Transition(*zip(*transitions))
+    states = np.array(transitions.state)
+    next_states = np.array(transitions.next_state)
+    actions = np.array(transitions.action)
+    rewards = np.array(transitions.reward)
+    is_terminal = np.array(transitions.is_terminal)
+
+    # Compute the next Q values using the target parameters
+    next_Q_values = dqn_fn(target_params, next_states)
+    # Bellman equation
+    yj = rewards + GAMMA * np.max(next_Q_values, axis=-1)
+    # In case of terminal state we set a 0 reward
+    yj = np.where(is_terminal, 0, yj)
+
+    # Compute the Qvalues corresponding to the sampled transitions
+    # and backpropagate the mse loss to compute the gradients
+    gradients = backward_fn(dqn.parameters, states, yj, actions)
+    
+    # Update the policy gradients
+    new_params = optimizer(dqn.parameters, gradients)
+    
+    # Return the improved model
+    return dqn.update(new_params)
+```
+
+### Mix implementations
+
+Finally, we are going to mix all the previous implementations into a single loop
+and understand how all the different modules interact with each other to achieve a
+perfect agent.
+
+```python
+MAX_EPISODES = 300
+MAX_EPISODE_STEPS = 100 # When agents holds the pole for 100 steps we are done :)
+
+env = gym.make('CartPole-v1')
+
+memory = ReplayMemory()
+
+for i_episode in range(MAX_EPISODES):
+    state = env.reset()
+    for timestep in range(MAX_EPISODE_STEPS):
+        env.render() # Display the environment
+        
+        # Take an action
+        random_key, subkey = jax.random.split(random_key)
+        action = take_action(subkey, state)
+        next_state, reward, done, _ = env.step(action)
+        
+        # Generate a transition
+        t = Transition(state=state, next_state=next_state, 
+                       reward=reward, is_terminal=done,
+                       action=action)
+        memory.experience(t) # Store the transition
+        train() # Update the agent with experience replay
+
+        state = next_state
+
+        if done: 
+            break # The pole has felt
+        
+    # At the end of the episode we update the target parameters
+    # Remember that during the episode we have updated the dqn parameters
+    target_params = dqn.parameters
+```
+
+## Results
+
+At *Figure 3* we can see how our agent is increasingly improving until it becomes
+nearly perfect by holding the pole always for 100 timesteps.
+
+![CartPole results](https://raw.githubusercontent.com/Guillem96/rl-examples-jax/master/reports/cartpole-results.png)
+
+*Figure 3. CartPole results*
+
+
+## Takeaways
+
+Well, guys, that's all for today. I hope you liked it, if not at least now you know JAX 😁.
+
+The important takeaways of this post are:
+
+- JAX may become the future of Deep Learning frameworks
+- JAX is flexible being capable of implementing custom and complex frameworks such RL is.
+- Deep Q Learning is simple but the start of all the known deep RL techniques known nowadays.
 
 ## References
 
