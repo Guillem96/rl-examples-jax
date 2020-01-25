@@ -1,7 +1,7 @@
 
 import jax
 import jax.numpy as np
-from ..typing import Parameter
+from ..typing import Parameter, JaxTensor
 
 
 def one_hot(x: JaxTensor, n_classes: int) -> JaxTensor:
