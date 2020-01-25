@@ -209,9 +209,9 @@ def take_action(key, state):
 
 The basic idea behind many RL algorithms is to estimate the action-value 
 function by using th Bellman Equation as an iterative update [2]. 
-$ Q_{i+1}(\phi, a) = r + \gamma max_{a\textprime} Q_i(\phi\textprime, a\textprime) $.
+$ Q_{i+1}(\phi, a) = r + \gamma max_{a'} Q_i(\phi', a') $.
 In real-world examples, this is impractical due to large state spaces and time complexity. 
-For this reason we use a function estimator $ Q^*(\phi, a) \approx Q(\phi, a, \theta) $,
+For this reason we use a function estimator $ Q^*(\phi, a) \approx Q(\phi, a; \theta) $,
 where $ \theta $ are the Neural network weights.
 
 Therefore, in the following training step, we will be modifying $ \theta $ until
