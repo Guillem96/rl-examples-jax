@@ -7,7 +7,7 @@ import jax.numpy as np
 from sklearn.datasets import fetch_openml
 
 import rl_jax.nn as nn
-from rl_jax.typing import JaxTensor
+from rl_jax.typing import JaxTensor, JaxModule, Criterion, BackwardFn
 
 EPOCHS = 8
 BATCH_SIZE = 32
@@ -41,6 +41,22 @@ def train_test_split(key: JaxTensor,
     
     return x_train, x_test, y_train, y_test
 
+
+def backward(model: JaxModule, 
+             criterion: Criterion) -> BackwardFn:
+    # Vectorize the model
+    vectorized_model = jax.vmap(model.forward_fn, 
+                                in_axes=(None, 0))
+    
+    # Create the forward function using the vectorized model as forward step
+    def forward_n_loss(params, x, y):
+        preds = vectorized_model(params, x)
+        return criterion(y, preds)
+
+    # Differentiate the forward and loss function
+    # Reverse gradients :)
+    return jax.value_and_grad(forward_n_loss)
+    
 
 def main():
     key = jax.random.PRNGKey(0)
@@ -104,7 +120,7 @@ def main():
 
     # Define the backward step of model to compute the derivatives of the
     # error wtr of the model.parameters
-    backward_fn = nn.backward(model, criterion)
+    backward_fn = backward(model, criterion)
     backward_fn = jax.jit(backward_fn)
 
     # Create an optimizer to update the model parameters

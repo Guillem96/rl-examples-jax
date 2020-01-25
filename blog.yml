@@ -1,0 +1,4 @@
+title: CartPole with JAX
+description: In this blog post we are going to train Deep Q-Learning to interact with CartPole-gym environment using the new autograd package JAX.
+image: https://upload.wikimedia.org/wikipedia/commons/9/9f/Fennec_Fox_Vulpes_zerda.jpg
+content: blog.md
