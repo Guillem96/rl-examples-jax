@@ -51,10 +51,10 @@ class Linear(JaxModule):
         self.b = None if not self.bias else norm_init(b_key, shape=())
     
     @property
-    def parameters(self):
+    def parameters(self) -> Parameter:
         return dict(W=self.W, bias=self.b)
     
-    def update(self, parameters):
+    def update(self, parameters: Parameter) -> 'Linear':
         instance = copy.deepcopy(self)
         instance.W = parameters['W']
         instance.b = parameters['bias']
@@ -76,15 +76,11 @@ class Linear(JaxModule):
 
 
 class Dropout(JaxModule):
-    """
-    Creates a JaxModule corsponding to a linear layer
-    
+    """    
     Parameters
     ----------
     prob: float, default .5
     """
-        
-
     def __init__(self, prob: float = .5):
         super(Dropout, self).__init__()
         self.prob = prob
@@ -102,9 +98,9 @@ class Dropout(JaxModule):
     
     @property
     def parameters(self):
-        return []
+        return dict()
 
-    def update(self, parameters):
+    def update(self, parameters) -> 'Dropout':
         return copy.deepcopy(self)
 
     def forward(self, x: JaxTensor, training: bool = True):

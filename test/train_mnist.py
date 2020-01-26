@@ -76,11 +76,9 @@ def main():
     y_test = nn.utils.one_hot(y_test, n_classes=10)
 
     # Define a sequential model
-    # The model receives two kind of parameters
-    #    - A random jax key to initialize the layers weights
-    #    - A set of JaxPartialModules, JaxPartialModule is a partially
-    #      evaluated function that when is called with a random key as
-    #      a parameter, it returns a fully functional JaxModule
+    # A sequential model receives a not-initialized set of layers or 
+    # other JaxModels, meaning that the init method of the layers has 
+    # not been called previously
     model = nn.Sequential(
         nn.Linear(in_features=28 * 28, 
                   out_features=512, 
@@ -96,17 +94,11 @@ def main():
                   out_features=10, 
                   activation=jax.nn.softmax),
     )
-    model.init(key)
 
-    # The model is a JaxModel
-    # JaxModel has two attributes
-    #    - forward_fn: A function is a differentiable function 
-    #      defining how a set of parameters should
-    #      operated in order to compute a tensor. For example, 
-    #      the forward function of an `nn.linear` is 
-    #      `lambda params, x: np.dot(params['W'], x) + params['bias']` 
-    #    - parameters: A group of parameters or weights
-    
+    # Now we initialize the model and all the hidden layers that the 
+    # nn.Sequential object encapsulates
+    model.init(key) # Delegating the init method to all layers with splitted keys
+
     # Create a CriterionFunction, in this case we use a cross entropy
     # loss with a mean reduction over the batch
     criterion = partial(nn.ce, reduction='mean')
@@ -114,7 +106,7 @@ def main():
     # Define the backward step of model to compute the derivatives of the
     # error wtr of the model.parameters
     backward_fn = backward(model, criterion)
-    backward_fn = jax.jit(backward_fn)
+    backward_fn = jax.jit(backward_fn) # Compile the function for performance
 
     # Create an optimizer to update the model parameters
     optimizer = nn.optim.simple_optimizer(learning_rate=1e-3)

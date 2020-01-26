@@ -24,34 +24,42 @@ def backward(model: JaxModule,
 key = jax.random.PRNGKey(0)
 
 # Create the model
-# Model recieves two type of parameters:
-#  - A random key to initialize the partially evaluated layers
-#  - A sequence of PartialJaxModules
-# A PartialJaxModule is just a partially evaluated function which the only
-# left parameter is a random key
-# In this case nn.sequential will take care of spliting the key according to
-# JAX good practices and initialize the PartialJaxModules
-model = nn.Sequential(
+# Create a sequential module the preprocess the input,
+# We create this kind of preprocessor to demonstrate that
+# modules recursion is possible
+preprocess_model = nn.Sequential(
     nn.Linear(in_features=128, out_features=64, activation=jax.nn.relu),
+    nn.Linear(in_features=64, out_features=64, activation=jax.nn.relu),)
+
+# A sequential model receives a not-initialized set of layers or 
+# other JaxModels
+model = nn.Sequential(
+    preprocess_model,
     nn.Linear(in_features=64, out_features=32, activation=jax.nn.relu),
     nn.Linear(in_features=32, out_features=1, activation=jax.nn.sigmoid))
+
+# When calling init with a random key the nn.Sequential object will take
+# care of spliting the key according to JAX good practices 
+# and initialize all the hidden layers
 model.init(key)
 
 # Select the function to minimize
 # Now, criterion is a Criterion function, meaning that it computes
 # a loss value given the ground truth and model predictions
 criterion = partial(nn.bce, reduction='mean')
+
+# The backward function will compute the gradients of the loss with
+# respect of the model weights
 backward_fn = partial(backward, criterion=criterion)
 backward_fn = jax.jit(jax.value_and_grad(backward_fn))
 
-# simple_optimizer creates a function that recieves two set of parameters
-# the first one is the actual model's parameters, and the second one are 
-# the gradients of each parameter
+# simple_optimizer creates a function that receives two JaxModules
+# the first one is the actual model, and the second one is the JaxModule 
+# containing the respective gradients for all the model's parameters
 # The optimizer will take care of updating all model's parameters
 optimizer = nn.optim.simple_optimizer(learning_rate=1e-2)
 optimizer = jax.jit(optimizer) # Compile the optimizer
 
-# Random inputs
 # Train a network to always output ones
 y_true = np.ones((10,))
 
@@ -67,8 +75,8 @@ for i in range(200):
     if i % 5 == 0:
         print('Loss:', loss)
     
-    # get the parameters that reduce the loss and update the model
-    # with the new parameters
+    # Optimizer will return a new model object containing the updated
+    # parameters
     model = optimizer(model, gradients)
 
 # Check if the model outputs a value close to one

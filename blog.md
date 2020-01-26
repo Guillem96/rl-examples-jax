@@ -282,7 +282,7 @@ for i_episode in range(MAX_EPISODES):
                        reward=reward, is_terminal=done,
                        action=action)
         memory.experience(t) # Store the transition
-        train() # Update the agent with experience replay
+        dqn = train() # Update the agent with experience replay
 
         state = next_state
 

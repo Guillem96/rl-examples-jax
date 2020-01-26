@@ -11,15 +11,28 @@ _CriterionOut = Union[JaxTensor, float]
 def bce(y_true: JaxTensor, 
         y_pred: JaxTensor, 
         reduction: str = None) -> _CriterionOut:
+    """
+    Computes the binary cross entropy
+    
+    Parameters
+    ----------
+    y_true: JaxTensor of shape (N,)
+        Ground truths
+    y_pred: JaxTensor of shape (N,)
+        The probability of every prediction of belonging to the true 
+        class
+    reduction: str, 'sum', 'none' or 'mean'
+        How to group the loss
+    """
+    # Clip the y_pred with an epsilon value to avoid nan when 
+    # applying the log
     epsilon = 1e-6
     y_pred = y_pred.reshape(-1)
     y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
 
     y_true = y_true.astype('float32')
 
-    pt = np.where(y_true == 1, 
-                  y_pred + epsilon, 
-                  1 - y_pred + epsilon)
+    pt = np.where(y_true == 1, y_pred, 1 - y_pred)
     loss = -np.log(pt)
     
     if reduction is None or reduction == 'none':

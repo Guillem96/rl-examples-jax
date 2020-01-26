@@ -4,12 +4,17 @@ from typing import Callable, Sequence
 
 import jax
 from .utils import register_jax_module
-from ..typing import (JaxModule, JaxTensor, 
-                      ForwardFn, Parameter)
+from ..typing import (JaxModule, JaxTensor, ForwardFn, Parameter)
 
 
 class Sequential(JaxModule):
-    
+    """
+    Parameters
+    ----------
+    layers: Sequence[JaxModules]
+        All the modules compoising the sequential model. The modules should
+        not have been initialized.
+    """
     def __init__(self, 
                  *layers: Sequence[JaxModule]):
         self.layers = layers
@@ -26,13 +31,14 @@ class Sequential(JaxModule):
             l.init(k)
     
     @property
-    def parameters(self):
+    def parameters(self) -> Sequence[Parameter]:
         return [l.parameters for l in self.layers]
 
-    def update(self, parameters):
+    def update(self, parameters: Sequence[Parameter]):
         instance = copy.deepcopy(self)
         instance.layers = [l.update(p) 
-                           for l, p in zip(self.layers, parameters)]
+                           for l, p in zip(self.layers, 
+                                           parameters)]
         return instance
 
     def forward(self, x: JaxTensor, training: bool = True):

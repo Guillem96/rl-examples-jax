@@ -1,5 +1,6 @@
 import abc
-from typing import Callable, Dict, NamedTuple, Union, Sequence, Tuple
+from typing import (Callable, Dict, NamedTuple, 
+                    Union, Sequence, Tuple, Mapping)
 
 import jax
 import numpy as np
@@ -40,7 +41,7 @@ ActivationFn = Callable[[JaxTensor], JaxTensor]
 class JaxModule(abc.ABC):
 
     @abc.abstractproperty
-    def parameters(self) -> Union[Sequence[Parameter], Parameter]:
+    def parameters(self) -> Union[Parameter, Sequence[Parameter]]:
         raise NotImplemented
     
     @abc.abstractmethod
