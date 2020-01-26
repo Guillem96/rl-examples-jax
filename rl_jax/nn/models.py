@@ -1,51 +1,51 @@
+import copy
 import functools
 from typing import Callable, Sequence
 
 import jax
+from .utils import register_jax_module
 from ..typing import (JaxModule, JaxTensor, 
-                      ForwardFn, Parameter, PartialJaxModule)
+                      ForwardFn, Parameter)
 
 
-class JaxModel(JaxModule):
+class Sequential(JaxModule):
     
-    def __call__(self, 
-                 x: JaxTensor, 
-                 training: bool = True,
-                 vectorize: bool = False):
+    def __init__(self, 
+                 *layers: Sequence[JaxModule]):
+        self.layers = layers
 
-        fn = functools.partial(self.forward_fn, training=training)
-        if vectorize:
-            fn = jax.vmap(fn, in_axes=(None, 0))
-
-        return fn(self.parameters, x)
+    def init(self, random_key: JaxTensor):
+        """
+        Parameters
+        ----------
+        key: JaxTensor
+            Jax random key to randomly initialize the layer weights
+        """
+        layer_keys = jax.random.split(random_key, num=len(self.layers))
+        for l, k in zip(self.layers, layer_keys):
+            l.init(k)
     
-    def update(self, parameters: Sequence[Parameter]):
-        return JaxModel(forward_fn=self.forward_fn, 
-                        parameters=parameters)
+    @property
+    def parameters(self):
+        return [l.parameters for l in self.layers]
 
+    def update(self, parameters):
+        instance = copy.deepcopy(self)
+        instance.layers = [l.update(p) 
+                           for l, p in zip(self.layers, parameters)]
+        return instance
 
-def _sequential_forward(parameters: Sequence[Parameter], 
-                        x: JaxTensor,
-                        training: bool = True,
-                        forward_fns: ForwardFn = None) -> JaxTensor:
+    def forward(self, x: JaxTensor, training: bool = True):
+        for l in self.layers:
+            x = l(x, training=training)
     
-    for p, f in zip(parameters, forward_fns):
-        x = f(p, x, training=training)
+        return x
     
-    return x
+    def __eq__(self, other: 'Sequential') -> bool:
+        if not super().__eq__(other):
+            return False
+        
+        return all(l1 == l2 for l1, l2 in zip(self.layers, other.layers))
 
 
-def sequential(key: JaxTensor, 
-               *layers: Sequence[PartialJaxModule]) -> JaxModel:
-    
-    # Randomly initialize layers
-    layer_keys = jax.random.split(key, num=len(layers))
-    layers = [l(k) for l, k in zip(layers, layer_keys)]
-
-    parameters = [l.parameters for l in layers]
-    forward_fns = [l.forward_fn for l in layers]
-    model_forward_fn = functools.partial(_sequential_forward, 
-                                         forward_fns=forward_fns)
-   
-    return JaxModel(parameters=parameters, 
-                    forward_fn=model_forward_fn)
+register_jax_module(Sequential)

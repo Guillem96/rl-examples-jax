@@ -1,82 +1,125 @@
+import copy
 import functools
 
 import jax
 import jax.numpy as np
 import numpy as onp
 
-
+from .utils import register_jax_module
 from ..typing import (ActivationFn, JaxTensor, 
                       JaxModule, Parameter)
 
 
-def _linear_forward(params: Parameter, 
-                    x: JaxTensor,
-                    training: bool = True,
-                    activation: ActivationFn = lambda x: x) -> JaxTensor:
-    W = params['W']
-    b = params['bias']
-
-    out = np.dot(W, x)
-    # if b is not None:
-    out = out + b
+class Linear(JaxModule):
+    """
+    Creates a JaxModule corresponding to a linear layer
     
-    return activation(out)
+    Parameters
+    ----------
+    in_features: int
+        Input feature size
+    out_features: int
+        Number of features after the linear transformation
+    activation: ActivationFn, default a linear activation (lambda x: x)
+        Activation to apply after the linear transformation. e.g `jax.nn.relu`, `jax.nn.sigmoid`...
+    bias: bool, default True
+        Whether or not the linear layer has to add bias
+    """
+    def __init__(self, 
+                 in_features: int, 
+                 out_features: int, 
+                 bias: bool = True, 
+                 activation: ActivationFn = lambda x: x):
+        self.in_features = in_features
+        self.out_features = out_features
+        self.bias = bias
+        self.activation = activation
+
+    def init(self, random_key: JaxTensor):
+        """
+        Parameters
+        ----------
+        key: JaxTensor
+            Jax random key to randomly initialize the layer weights
+        """
+        W_key, b_key = jax.random.split(random_key)
+
+        x_init = jax.nn.initializers.xavier_uniform() 
+        norm_init = jax.nn.initializers.normal()
+
+        self.W = x_init(W_key, shape=(self.out_features, self.in_features))
+        self.b = None if not self.bias else norm_init(b_key, shape=())
+    
+    @property
+    def parameters(self):
+        return dict(W=self.W, bias=self.b)
+    
+    def update(self, parameters):
+        instance = copy.deepcopy(self)
+        instance.W = parameters['W']
+        instance.b = parameters['bias']
+        return instance
+
+    def forward(self, x: JaxTensor, training: bool = True):
+        out = np.dot(self.W, x)
+        if self.b is not None:
+            out = out + self.b
+        
+        return self.activation(out)
+    
+    def __eq__(self, other) -> bool:
+        if not super().__eq__(other):
+            return False
+
+        return all(k1 == k2 
+                    for k1, k2 in zip(self.parameters, other.parameters))
 
 
-def linear(key: JaxTensor,
-           in_features: int,
-           out_features: int, 
-           activation: ActivationFn = lambda x: x,
-           bias: bool = True) -> JaxModule:
+class Dropout(JaxModule):
     """
     Creates a JaxModule corsponding to a linear layer
     
     Parameters
     ----------
-    key: JaxTensor
-        Jax random key to randomly initialize the layer weights
-    in_features: int
-        Input feature size
-    out_features: int
-        Number of features after the linear transformation
-    activation: ActivationFn, default a lniear activation (lambda x: x)
-        Activation to apply after the linear transformation. e.g `jax.nn.relu`, `jax.nn.sigmoid`...
-    bias: bool, default True
-        Whether or not the linear layer has to add bias
-    
-    Returns
-    -------
-    JaxModule
+    prob: float, default .5
     """
-    W_key, b_key = jax.random.split(key)
+        
 
-    x_init = jax.nn.initializers.xavier_uniform() 
-    norm_init = jax.nn.initializers.normal()
+    def __init__(self, prob: float = .5):
+        super(Dropout, self).__init__()
+        self.prob = prob
+        self.random_key = None
 
-    W = x_init(W_key, shape=(out_features, in_features))
-    b = None if not bias else norm_init(b_key, shape=())
-    params = dict(W=W, bias=b)
-    forward_fn = functools.partial(_linear_forward, 
-                                activation=activation)
+    def init(self, random_key: JaxTensor):
+        """
+        Parameters
+        ----------
+        key: JaxTensor
+            Jax random key to randomly initialize the layer weights
+        """
+        key, subkey = jax.random.split(random_key)
+        self.random_key = subkey
+    
+    @property
+    def parameters(self):
+        return []
 
-    return JaxModule(parameters=params, 
-                     forward_fn=forward_fn)
-  
+    def update(self, parameters):
+        return copy.deepcopy(self)
 
-def _forward_dropout(params: Parameter,
-                     x: JaxTensor, 
-                     training: bool = True,
-                     prob: float = .5) -> JaxTensor:
-    if not training:
-        return x
+    def forward(self, x: JaxTensor, training: bool = True):
+        if not training:
+            return x
 
-    drop_mask = onp.random.choice([0, 1], 
-                                  p=[prob, 1 - prob],
-                                  size=x.shape)
-    return np.multiply(drop_mask, x)
+        self.random_key, subkey = jax.random.split(self.random_key)
+
+        keep_mask = jax.random.uniform(subkey, shape=x.shape) 
+        keep_mask = (keep_mask > self.prob).astype('float32')
+        return np.multiply(keep_mask, x)
+
+    def __eq__(self, other) -> bool:
+        return self.prob == other.prob
 
 
-def dropout(key: JaxTensor, prob: float = .5):
-    return JaxModule(parameters={}, 
-                     forward_fn=functools.partial(_forward_dropout, 
-                                                  prob=prob))
+register_jax_module(Linear)
+register_jax_module(Dropout)

@@ -9,7 +9,7 @@ from sklearn.datasets import fetch_openml
 import rl_jax.nn as nn
 from rl_jax.typing import JaxTensor, JaxModule, Criterion, BackwardFn
 
-EPOCHS = 8
+EPOCHS = 12
 BATCH_SIZE = 32
 STEPS_PER_EPOCH = 256
 
@@ -28,7 +28,7 @@ def train_test_split(key: JaxTensor,
                      x: JaxTensor, y: JaxTensor):
 
     data = np.concatenate(
-        [x, np.expand_dims(y, axis=-1)], axis=-1)[:5000]
+        [x, np.expand_dims(y, axis=-1)], axis=-1)[:10000]
     # print('Shuffling data...')
     # data = jax.random.shuffle(key, data, axis=0)
     train_size = int(data.shape[0] * .8)
@@ -44,13 +44,10 @@ def train_test_split(key: JaxTensor,
 
 def backward(model: JaxModule, 
              criterion: Criterion) -> BackwardFn:
-    # Vectorize the model
-    vectorized_model = jax.vmap(model.forward_fn, 
-                                in_axes=(None, 0))
     
     # Create the forward function using the vectorized model as forward step
-    def forward_n_loss(params, x, y):
-        preds = vectorized_model(params, x)
+    def forward_n_loss(model, x, y):
+        preds = jax.vmap(model)(x)
         return criterion(y, preds)
 
     # Differentiate the forward and loss function
@@ -84,26 +81,22 @@ def main():
     #    - A set of JaxPartialModules, JaxPartialModule is a partially
     #      evaluated function that when is called with a random key as
     #      a parameter, it returns a fully functional JaxModule
-    model = nn.sequential(
-        key,
-        partial(nn.linear,
-                in_features=28 * 28, 
-                out_features=512, 
-                activation=jax.nn.sigmoid),
-        partial(nn.linear,
-                in_features=512, 
-                out_features=256, 
-                activation=jax.nn.relu),
-        partial(nn.linear,
-                in_features=256, 
-                out_features=128, 
-                activation=jax.nn.relu),
-        partial(nn.dropout, prob=.3),
-        partial(nn.linear,
-                in_features=128, 
-                out_features=10, 
-                activation=jax.nn.softmax),
+    model = nn.Sequential(
+        nn.Linear(in_features=28 * 28, 
+                  out_features=512, 
+                  activation=jax.nn.relu),
+        nn.Linear(in_features=512, 
+                  out_features=256, 
+                  activation=jax.nn.relu),
+        nn.Linear(in_features=256, 
+                  out_features=128, 
+                  activation=jax.nn.relu),
+        nn.Dropout(prob=.3),
+        nn.Linear(in_features=128, 
+                  out_features=10, 
+                  activation=jax.nn.softmax),
     )
+    model.init(key)
 
     # The model is a JaxModel
     # JaxModel has two attributes
@@ -137,26 +130,26 @@ def main():
                                            minval=0, maxval=x_train.shape[0])
             x_batch = x_train[batch_idx]
             y_batch = y_train[batch_idx]
-
-            # Compute the loss and the gradients
-            loss, gradients = backward_fn(model.parameters, x_batch, y_batch)
-            # Apply gradients to reduce the loss
-            new_parameters = optimizer(model.parameters, gradients)
             
+            # Compute the loss and the gradients
+            loss, gradients = backward_fn(model, x_batch, y_batch)
+            
+            # Apply gradients to reduce the loss
             # JaxModels are immutable, so when updating the model with
             # new parameters, we are creating a new instance of a JaxModel
             # with the new parameters
-            model = model.update(new_parameters)
+            model = optimizer(model, gradients)
 
             if step % 20 == 0:
                 print(f'Epoch [{epoch}] loss: {loss:.4f}')
 
     print('Evaluating...')
     
-    y_pred = model(x_train, vectorize=True, training=False)
+    inference_fn = jax.vmap(partial(model, training=False))
+    y_pred = inference_fn(x_train)
     train_acc = accuracy(y_train, y_pred)
     
-    y_pred = model(x_test, vectorize=True, training=False)
+    y_pred = inference_fn(x_test)
     test_acc = accuracy(y_test, y_pred)
 
     print(f'Train Accuracy: {train_acc:.3f}')

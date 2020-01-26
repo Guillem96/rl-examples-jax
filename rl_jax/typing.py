@@ -1,3 +1,4 @@
+import abc
 from typing import Callable, Dict, NamedTuple, Union, Sequence, Tuple
 
 import jax
@@ -36,11 +37,26 @@ ActivationFn = Callable[[JaxTensor], JaxTensor]
 
 # "Super Type" that will include any object created
 # by our API. Similar to a Layer in keras or an nn.Module in PyTorch
-class JaxModule(NamedTuple):
-    forward_fn: ForwardFn
-    parameters: Union[Parameter, Sequence[Parameter]]
+class JaxModule(abc.ABC):
 
-# JaxModule not initialized, to initialize a jax module you have to
-# provide it a random key
-PartialJaxModule = Callable[[JaxTensor], JaxModule]
+    @abc.abstractproperty
+    def parameters(self) -> Union[Sequence[Parameter], Parameter]:
+        raise NotImplemented
+    
+    @abc.abstractmethod
+    def init(self, random_key: JaxTensor):
+        raise NotImplemented
+
+    @abc.abstractmethod
+    def forward(self, x: JaxTensor, training: bool):
+        raise NotImplemented
+
+    def __call__(self, x: JaxTensor, training: bool = True):
+        return self.forward(x, training)
+
+    def __getitem__(self, key: Union[str, int]) -> Union[Parameter, JaxTensor]:
+        return self.parameters[key]
+
+    def __eq__(self, other: 'JaxModule') -> bool:
+        return len(self.parameters) == len(other.parameters)
 

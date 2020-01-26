@@ -1,4 +1,4 @@
-from .layers import linear, dropout
-from .models import sequential
+from .layers import Linear, Dropout
+from .models import Sequential
 from .losses import bce, ce
 from . import optim

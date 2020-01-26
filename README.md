@@ -15,14 +15,13 @@ from functools import partial
 import jax
 import rl_jax.nn as nn
 
-key = key = jax.random.PRNGKey(0)
+key = jax.random.PRNGKey(0)
 
 model = nn.sequential(
-    key,
-    partial(nn.linear, 
-            in_features=32, 
-            out_features=1, 
-            activation=jax.nn.sigmoid))
+    nn.Linear(in_features=32, 
+              out_features=1, 
+              activation=jax.nn.sigmoid))
+model.init(key)
 
 key, subkey = jax.random.split(key)
 x_input = jax.random.uniform(subkey, shape=(32,))

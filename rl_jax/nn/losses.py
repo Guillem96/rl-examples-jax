@@ -54,6 +54,7 @@ def ce(y_true: JaxTensor,
     >>> predictions = jax.nn.softmax(jax.random.uniform(key, shape=(10, 3)))
     >>> loss = rl_jax.nn.ce(target, predictions, reduction='mean')
     """
+    y_pred = np.clip(y_pred, 1e-6, 1 - 1e-6)
     loss = y_true * -np.log(y_pred)
 
     if reduction is None or reduction == 'none':

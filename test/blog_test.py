@@ -36,39 +36,38 @@ class ReplayMemory(object):
 
 
 ## Creating the model and backward step
+def create_dqn(key):
+    model =  nn.Sequential(
+        nn.Linear(in_features=4, 
+                  out_features=32,
+                  activation=jax.nn.relu),
+        nn.Linear(in_features=32, 
+                  out_features=32,
+                  activation=jax.nn.relu),
+        nn.Linear(in_features=32, 
+                  out_features=2))
+    model.init(key)
+    return model
+
 random_key = jax.random.PRNGKey(0)
-dqn = nn.sequential(
-    random_key, # remember in jax the random key is mandatory
-    partial(nn.linear, 
-            in_features=4, 
-            out_features=32,
-            activation=jax.nn.relu),
-    partial(nn.linear, 
-            in_features=32, 
-            out_features=32,
-            activation=jax.nn.relu),
-    partial(nn.linear, 
-            in_features=32, 
-            out_features=2))
 
-# Vectorize the function to automatically work with batches
-dqn_fn = jax.vmap(dqn.forward_fn, in_axes=(None, 0))
-dqn_fn = jax.jit(dqn_fn) # Compile the function with JIT
-
-# Create target parameters for training stability
-target_params = dqn.parameters
+# We create the model using the same key 
+# so they are initialized with the same parameters
+dqn = create_dqn(random_key)
+# Create a target model for training stability
+target_dqn = create_dqn(random_key)
 
 # Mean squared error
 mse = lambda y1, y2: (y1 - y2) ** 2
 
 @jax.grad # Differentiate the loss
-def compute_loss(params, x, y, actions):
+def compute_loss(dqn, x, y, actions):
     # Get the q values corresponding to specified actions
-    q_values = dqn_fn(params, x)
+    q_values = jax.vmap(dqn)(x) # Vectorized model 
     q_values = q_values[np.arange(x.shape[0]), actions]
     return np.mean(mse(y, q_values))
 
-# Again, we compile the function with jit to improve performanve
+# Again, we compile the function with jit to improve performance
 backward_fn = jax.jit(compute_loss)
 
 # Declare an SGD optimizer
@@ -96,11 +95,9 @@ BATCH_SIZE = 32
 GAMMA = .99
 EPSILON = .3
 
-
 def train():
     if len(memory) < BATCH_SIZE:
         return dqn # No train because we do not have enough experiences
-
     # Experience replay
     transitions = memory.sample(BATCH_SIZE)
         
@@ -113,7 +110,8 @@ def train():
     is_terminal = np.array(transitions.is_terminal)
 
     # Compute the next Q values using the target parameters
-    next_Q_values = dqn_fn(target_params, next_states)
+    # We vectorize the model using vmap to work with batches
+    next_Q_values = jax.vmap(target_dqn)(next_states)
     # Bellman equation
     yj = rewards + GAMMA * np.max(next_Q_values, axis=-1)
     # In case of terminal state we set a 0 reward
@@ -121,14 +119,12 @@ def train():
 
     # Compute the Qvalues corresponding to the sampled transitions
     # and backpropagate the mse loss to compute the gradients
-    gradients = backward_fn(dqn.parameters, states, yj, actions)
+    gradients = backward_fn(dqn, states, yj, actions)
     
-    # Update the policy gradients
-    new_params = optimizer(dqn.parameters, gradients)
-
-    # Return the improved model
-    return dqn.update(new_params)
-
+    # Update the policy gradients and return the
+    # updated model
+    return optimizer(dqn, gradients)
+    
 
 MAX_EPISODES = 300
 MAX_EPISODE_STEPS = 100 # When agents holds the pole for 100 steps we are done :)
@@ -161,7 +157,7 @@ for i_episode in range(MAX_EPISODES):
         
     # At the end of the episode we update the target parameters
     # Remember that during the episode we have updated the dqn parameters
-    target_params = dqn.parameters
+    target_dqn = target_dqn.update(dqn.parameters)
 
 if __name__ == "__main__":
     run()

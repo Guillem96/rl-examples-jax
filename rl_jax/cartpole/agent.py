@@ -1,5 +1,3 @@
-from functools import partial
-
 import jax
 import jax.numpy as np
 
@@ -27,22 +25,19 @@ class DeepQLearning(object):
         # Create the model that is going to be optimized during the episode
         # It also will take the actions
         self.dqn = self._create_model()
-
-        # Vectorize the function to automatically work with batches
-        self.dqn_fn = jax.vmap(self.dqn.forward_fn, 
-                               in_axes=(None, 0))
-        self.dqn_fn = jax.jit(self.dqn_fn) # Compile the function with JIT
-
-        # Create target parameters for training stability
-        self.target_params = self.dqn.parameters
+        # Create the model with same architecture as dqn
+        # This model will take care of computing the expected q values
+        self.target_dqn = self._create_model()
+        self.target_dqn = self.target_dqn.update(self.dqn.parameters)
+        self.target_dqn_fn = jax.vmap(self.target_dqn)
 
         # Declare the mean squared error
         mse = lambda y_true, y_pred: (y_true - y_pred) ** 2 
         
         @jax.grad
-        def forward_n_loss(params, x, y, actions):
+        def forward_n_loss(dqn, x, y, actions):
             # Get the q values corresponding to specified actions
-            q_values = self.dqn_fn(params, x)
+            q_values = jax.vmap(dqn)(x)
             q_values = q_values[np.arange(x.shape[0]), actions]
             return np.mean(mse(y, q_values))
         
@@ -53,19 +48,17 @@ class DeepQLearning(object):
     
     def _create_model(self):
         self.random_key, sk = jax.random.split(self.random_key)
-        return nn.sequential(
-            sk,
-            partial(nn.linear, 
-                    in_features=4, 
-                    out_features=32,
-                    activation=jax.nn.relu),
-            partial(nn.linear, 
-                    in_features=32, 
-                    out_features=32,
-                    activation=jax.nn.relu),
-            partial(nn.linear, 
-                    in_features=32, 
-                    out_features=2))
+        model =  nn.Sequential(
+            nn.Linear(in_features=4, 
+                     out_features=32,
+                     activation=jax.nn.relu),
+            nn.Linear(in_features=32, 
+                     out_features=32,
+                     activation=jax.nn.relu),
+            nn.Linear(in_features=32, 
+                      out_features=2))
+        model.init(sk)
+        return model
 
     def _train(self):
         if len(self.memory) < self.batch_size:
@@ -82,20 +75,17 @@ class DeepQLearning(object):
         is_terminal = np.array(transitions.is_terminal)
 
         # Compute the next Q values using the target parameters
-        next_Q_values = self.dqn_fn(self.target_params, next_states)
+        next_Q_values = self.target_dqn_fn(next_states)
         yj = rewards + self.gamma * np.max(next_Q_values, axis=-1)
         # In case of terminal state we set a 0 rweward
         yj = np.where(is_terminal, 0, yj)
 
         # Compute the Qvalues corresponding to the sampled transitions
         # and backpropagate the mse loss to compute the gradients
-        gradients = self.backward_fn(
-            self.dqn.parameters, 
-            states, yj, actions)
+        gradients = self.backward_fn(self.dqn, states, yj, actions)
         
         # Update the policy gradients
-        new_params = self.optimizer(self.dqn.parameters, gradients)
-        self.dqn = self.dqn.update(new_params)
+        self.dqn = self.optimizer(self.dqn, gradients)
         
     def update(self, t: rl_utils.Transition):
         if not self.training:
@@ -110,7 +100,8 @@ class DeepQLearning(object):
         # Update the target parameters with the "experiences" of 
         # the current episode
         if t.is_terminal:
-            self.target_params = self.dqn.parameters
+            self.target_dqn = self.target_dqn.update(self.dqn.parameters)
+            self.target_dqn_fn = jax.vmap(self.target_dqn)
     
     def take_action(self, state: JaxTensor) -> int:
         self.random_key, sk = jax.random.split(self.random_key)
