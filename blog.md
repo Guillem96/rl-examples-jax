@@ -316,6 +316,6 @@ The important takeaways of this post are:
 
 ## References
 
-[1] 
+[1] JAX: composable transformations of Python+NumPy programs - http://github.com/google/jax
 
 [2] Playing Atari with Deep Reinforcement Learning - https://www.cs.toronto.edu/~vmnih/docs/dqn.pdf

@@ -11,8 +11,6 @@ from rl_jax.typing import JaxModule, JaxTensor, Criterion
 # both, the loss and gradients
 # A BackwardFunction will take care of vectorizing the model and convert the
 # Criterion to return the reverse-gradients
-
-
 def backward(model: JaxModule, 
              x: JaxTensor, 
              y: JaxTensor,
