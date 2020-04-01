@@ -1,34 +1,8 @@
 # Reinforcement learning with Jax
 
-Simple reinforcement learning examples with [JAX](https://github.com/google/jax).
+Simple reinforcement learning examples with [JAX](https://github.com/google/jax) and [Haiku](https://github.com/deepmind/dm-haiku).
 
 The aim of this repository is to provide simple examples on how to develop Deep Reinforcement learning using JAX.
-
-## Intuitive NN interface
-
-To make life easier, I developed a high-level API to prototype NN architectures. The API is thought to be simple and intuitive, but it requires a mid-level understanding of higher-order functions.
-This is because JAX is pretty functional and develop extension over it using classes or objects requires complex workarounds.
-
-```python
-# Example: How to create a linear binary classifier
-from functools import partial
-import jax
-import rl_jax.nn as nn
-
-key = jax.random.PRNGKey(0)
-
-model = nn.sequential(
-    nn.Linear(in_features=32, 
-              out_features=1, 
-              activation=jax.nn.sigmoid))
-model.init(key)
-
-key, subkey = jax.random.split(key)
-x_input = jax.random.uniform(subkey, shape=(32,))
-prediction = model(x_input)
-```
-
-To learn more about the API refer to this [example](test/train_mnist.py) where we describe how to train a multi class classification model.
 
 ## References
 

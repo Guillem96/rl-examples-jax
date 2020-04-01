@@ -79,3 +79,20 @@ def ce(y_true: JaxTensor,
         return np.mean(sum_over_batch)
     else:
         raise ValueError('Unexpected reduction type')
+
+
+def mse(y_true: JaxTensor, 
+        y_pred: JaxTensor, 
+        reduction: str = None) -> _CriterionOut:
+    
+    loss = np.square(y_true - y_pred)
+
+    if reduction is None or reduction == 'none':
+        return loss
+    elif reduction == 'sum':
+        return np.sum(loss)
+    elif reduction == 'mean':
+        sum_over_batch = np.sum(loss, axis=-1)
+        return np.mean(sum_over_batch)
+    else:
+        raise ValueError('Unexpected reduction type')

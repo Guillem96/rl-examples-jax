@@ -72,6 +72,7 @@ The main idea behind Q-Learning is that if we have a function $ Q^*(\phi, a) $ t
 I hope you are ready for a JAX implementation 😎.
 
 ```python
+import copy
 import random
 from typing import *
 from functools import partial
@@ -80,15 +81,15 @@ import gym # RL environments
 import jax # Autograd package
 import jax.numpy as np # GPU NumPy :)
 
+import haiku as hk
+
 import rl_jax.nn as nn # Custom package
-from rl_jax.typing import *
+from rl_jax.typing import JaxTensor
 ```
 
-To make life easier, I developed a high-level API to prototype NN architectures. The API is thought to be simple and intuitive, but it requires a mid-level understanding of higher-order functions.
+To make life easier, instead of developing neural network layers from scratch, we are going to use the [Haiku](https://github.com/deepmind/dm-haiku) package. Haiku API is thought to be simple and intuitive, but it requires a mid-level understanding of higher-order functions.
 
 This is because JAX is pretty functional and develop extension over it using classes or objects requires complex workarounds.
-
-To learn more about my custom nn package please refer to this [training example](https://github.com/Guillem96/rl-examples-jax/blob/master/test/train_mnist.py).
 
 ### Replay Memory
 
@@ -136,48 +137,47 @@ Our model will be a simple set of linear layers (if you come from a tensorflow o
 of size equal to the number of possible actions, in this case 2 (move left or right), without any activation.
 
 ```python
-def create_dqn(key):
-    model =  nn.Sequential(
-        nn.Linear(in_features=4, 
-                  out_features=32,
-                  activation=jax.nn.relu),
-        nn.Linear(in_features=32, 
-                  out_features=32,
-                  activation=jax.nn.relu),
-        nn.Linear(in_features=32, 
-                  out_features=2))
-    model.init(key)
-    return model
+def forward_fn(observations):
+    mlp = hk.Sequential([
+        hk.Linear(300), jax.nn.relu,
+        hk.Linear(100), jax.nn.relu,
+        hk.Linear(2)
+    ])
+    return mlp(observations)
 
 random_key = jax.random.PRNGKey(0)
 
-# We create the model using the same key 
-# so they are initialized with the same parameters
-dqn = create_dqn(random_key)
-# Create a target model for training stability
-target_dqn = create_dqn(random_key)
+
+# Haiku models has two functions: init and apply
+#  - init: Initializes the model's weights given a mock input
+#  - apply: Does a forward step
+model = hk.transform(forward_fn)
+
+# When using haiku, model has to be initialized using mock inputs,
+# they can be random
+random_key, model_key = jax.random.split(random_key)
+dqn_params = model.init(
+    model_key, 
+    jax.random.normal(model_key, shape=(1, 4)))
+target_dqn_params = copy.deepcopy(dqn_params)
 ```
 
 A part from the model we have to define the loss function with respect of the model
 parameters, so later we can differentiate it and compute the gradients.
 
 ```python
-# Mean squared error
-mse = lambda y1, y2: (y1 - y2) ** 2
 
-@jax.grad # Differentiate the loss
-def compute_loss(dqn, x, y, actions):
-    # Get the q values corresponding to specified actions
-    q_values = jax.vmap(dqn)(x) # Vectorized model 
-    q_values = q_values[np.arange(x.shape[0]), actions]
-    return np.mean(mse(y, q_values))
-
-# Again, we compile the function with jit to improve performance
-backward_fn = jax.jit(compute_loss)
+@jax.grad
+@jax.jit
+def backward_fn(params, observations, q_values, actions):
+    logits = model.apply(params, observations)
+    # We pick the values of taken actions
+    logits = logits[np.arange(logits.shape[0]), actions]
+    return nn.losses.mse(q_values, logits, reduction='mean') 
 
 # Declare an SGD optimizer
-optimizer = nn.optim.simple_optimizer(learning_rate=1e-3)
-optimizer = jax.jit(optimizer) # Compile
+optimizer = partial(nn.optim.simple_optimizer, 
+                    learning_rate=1e-3)
 ```
 
 ### Take the action
@@ -194,10 +194,8 @@ def take_action(key, state):
         # Remember that we have only 2 actions (left, right)
         action = jax.random.randint(sk, shape=(1,), minval=0, maxval=2)
     else:
-        # When invoking __call__ method of JaxModule the parameters are implicitly
-        # passed as argument of the forward function of the model (refer to custom nn module implementation)
         # Compute state QValues
-        q_values = dqn(state, training=False)
+        q_values = model.apply(dqn_params, state.reshape(1, -1))
         # Pick the action that maximizes the value
         action = np.argmax(q_values)
     
@@ -223,12 +221,11 @@ EPSILON = .3
 
 def train():
     if len(memory) < BATCH_SIZE:
-        return dqn # No train because we do not have enough experiences
+        return dqn_params # No train because we do not have enough experiences
     # Experience replay
     transitions = memory.sample(BATCH_SIZE)
         
     # Convert transition into tensors
-
     transitions = Transition(*zip(*transitions))
     states = np.array(transitions.state)
     next_states = np.array(transitions.next_state)
@@ -238,7 +235,7 @@ def train():
 
     # Compute the next Q values using the target parameters
     # We vectorize the model using vmap to work with batches
-    next_Q_values = jax.vmap(target_dqn)(next_states)
+    next_Q_values = model.apply(target_dqn_params, next_states)
     # Bellman equation
     yj = rewards + GAMMA * np.max(next_Q_values, axis=-1)
     # In case of terminal state we set a 0 reward
@@ -246,11 +243,12 @@ def train():
 
     # Compute the Qvalues corresponding to the sampled transitions
     # and backpropagate the mse loss to compute the gradients
-    gradients = backward_fn(dqn, states, yj, actions)
+    gradients = backward_fn(dqn_params, states, yj, actions)
     
     # Update the policy gradients and return the
     # updated model
-    return optimizer(dqn, gradients)
+    # Using tree_multimap we apply the optimizer to all parameters
+    return jax.tree_multimap(optimizer, dqn_params, gradients)
 ```
 
 ### Mix implementations
@@ -282,7 +280,7 @@ for i_episode in range(MAX_EPISODES):
                        reward=reward, is_terminal=done,
                        action=action)
         memory.experience(t) # Store the transition
-        dqn = train() # Update the agent with experience replay
+        dqn_params = train() # Update the agent with experience replay
 
         state = next_state
 
@@ -291,7 +289,7 @@ for i_episode in range(MAX_EPISODES):
         
     # At the end of the episode we update the target parameters
     # Remember that during the episode we have updated the dqn parameters
-    target_dqn = target_dqn.update(dqn.parameters)
+    target_dqn_params = copy.deepcopy(dqn_params)
 ```
 
 ## Results

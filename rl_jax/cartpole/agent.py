@@ -1,5 +1,10 @@
+import copy
+import functools
+
 import jax
 import jax.numpy as np
+
+import haiku as hk
 
 import rl_jax.nn as nn
 import rl_jax.utils as rl_utils
@@ -21,45 +26,45 @@ class DeepQLearning(object):
         self.memory = rl_utils.ReplayMemory(size=memory_size)
         self.batch_size = batch_size
         self.random_key = jax.random.PRNGKey(0)
+        
+        # Create the forward pass of the model
+        def forward_fn(observations):
+            mlp = hk.Sequential([
+                hk.Linear(300), jax.nn.relu,
+                hk.Linear(100), jax.nn.relu,
+                hk.Linear(2)
+            ])
+            return mlp(observations)
+        
+        # We also declare a function to compute the loss given the model 
+        # parameters
+        def loss_fn(params, observations, q_values, actions):
+            logits = self.model.apply(params, observations)
+            # We pick the values of taken actions
+            logits = logits[np.arange(logits.shape[0]), actions]
+            return nn.losses.mse(q_values, logits, reduction='mean') 
 
-        # Create the model that is going to be optimized during the episode
-        # It also will take the actions
-        self.dqn = self._create_model()
-        # Create the model with same architecture as dqn
+        # When using haiku, model has to be initialized using mock inputs,
+        # they can be random
+        self.model = hk.transform(forward_fn)
+
+        self.random_key, model_key = jax.random.split(self.random_key)
+        self.dqn_params = self.model.init(
+            model_key, 
+            jax.random.normal(model_key, shape=(1, 4)))
+        
+        # Target dqn contains a copy of dqn parameters
         # This model will take care of computing the expected q values
-        self.target_dqn = self._create_model()
-        self.target_dqn = self.target_dqn.update(self.dqn.parameters)
-        self.target_dqn_fn = jax.vmap(self.target_dqn)
+        self.target_dqn_params = copy.deepcopy(self.dqn_params)
+        
+        # Define the backward step by just decorating the model's apply function
+        # To do so, we use the loss function in order to compute the gradients,
+        # wtr to the loss
+        self.backward_fn = jax.grad(jax.jit(loss_fn))
 
-        # Declare the mean squared error
-        mse = lambda y_true, y_pred: (y_true - y_pred) ** 2 
-        
-        @jax.grad
-        def forward_n_loss(dqn, x, y, actions):
-            # Get the q values corresponding to specified actions
-            q_values = jax.vmap(dqn)(x)
-            q_values = q_values[np.arange(x.shape[0]), actions]
-            return np.mean(mse(y, q_values))
-        
-        self.backward_fn = jax.jit(forward_n_loss)
-        
-        self.optimizer = nn.optim.simple_optimizer(learning_rate=1e-3)
-        self.optimizer = jax.jit(self.optimizer)
+        self.optimizer = functools.partial(nn.optim.simple_optimizer, 
+                                           learning_rate=1e-3)
     
-    def _create_model(self):
-        self.random_key, sk = jax.random.split(self.random_key)
-        model =  nn.Sequential(
-            nn.Linear(in_features=4, 
-                     out_features=32,
-                     activation=jax.nn.relu),
-            nn.Linear(in_features=32, 
-                     out_features=32,
-                     activation=jax.nn.relu),
-            nn.Linear(in_features=32, 
-                      out_features=2))
-        model.init(sk)
-        return model
-
     def _train(self):
         if len(self.memory) < self.batch_size:
             return
@@ -75,17 +80,18 @@ class DeepQLearning(object):
         is_terminal = np.array(transitions.is_terminal)
 
         # Compute the next Q values using the target parameters
-        next_Q_values = self.target_dqn_fn(next_states)
+        next_Q_values = self.model.apply(self.target_dqn_params, next_states)
         yj = rewards + self.gamma * np.max(next_Q_values, axis=-1)
         # In case of terminal state we set a 0 rweward
         yj = np.where(is_terminal, 0, yj)
 
         # Compute the Qvalues corresponding to the sampled transitions
         # and backpropagate the mse loss to compute the gradients
-        gradients = self.backward_fn(self.dqn, states, yj, actions)
+        gradients = self.backward_fn(self.dqn_params, states, yj, actions)
         
         # Update the policy gradients
-        self.dqn = self.optimizer(self.dqn, gradients)
+        self.dqn_params = jax.tree_multimap(
+            self.optimizer, self.dqn_params, gradients)
         
     def update(self, t: rl_utils.Transition):
         if not self.training:
@@ -100,15 +106,14 @@ class DeepQLearning(object):
         # Update the target parameters with the "experiences" of 
         # the current episode
         if t.is_terminal:
-            self.target_dqn = self.target_dqn.update(self.dqn.parameters)
-            self.target_dqn_fn = jax.vmap(self.target_dqn)
-    
+            self.target_dqn_params = copy.deepcopy(self.dqn_params)
+
     def take_action(self, state: JaxTensor) -> int:
         self.random_key, sk = jax.random.split(self.random_key)
         if jax.random.uniform(sk, shape=(1,)) < self.epsilon:
             action = jax.random.randint(sk, shape=(1,), minval=0, maxval=2)
         else:
-            q_values = self.dqn(state, training=False)
+            q_values = self.model.apply(self.dqn_params, state.reshape(1, -1))
             action = np.argmax(q_values)
         
         return int(action)
